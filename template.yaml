@@ -14,34 +14,52 @@ Globals:
         ALPACA_KEY_ID_PARAM: /nant-trading-bot/alpaca_key_id
         ALPACA_SECRET_KEY_PARAM: /nant-trading-bot/alpaca_secret_key
         DISCORD_WEBHOOK_PARAM: /nant-watch/discord_webhook_url
+        SPARTICUS_KEY_ID_PARAM: /nant-watch/sparticus_key_id
+        SPARTICUS_SECRET_KEY_PARAM: /nant-watch/sparticus_secret_key
 
 Resources:
   DailyFunction:
     Type: AWS::Serverless::Function
     Properties:
       FunctionName: nant-watch-daily
-      Description: Weekday end-of-day market breakdown to Discord (read-only)
+      Description: Weekday posts - 9:30 open review, 11/12/2 race updates, 4:00 close review (read-only)
       Handler: app.daily_handler
       Timeout: 300
       EventInvokeConfig:
         MaximumRetryAttempts: 0   # a failed run alerts once instead of retrying and double-posting
       Policies:
         - Statement:
-            - Sid: ReadOnlyTheThreeSecretsWeNeed
+            - Sid: ReadOnlyTheFiveSecretsWeNeed
               Effect: Allow
               Action: ssm:GetParameters
               Resource:
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_key_id
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_secret_key
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/discord_webhook_url
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_key_id
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_secret_key
       Events:
-        WeekdayAfterClose:
+        MarketOpen:
           Type: ScheduleV2
           Properties:
-            Name: nant-watch-daily
-            ScheduleExpression: cron(15 17 ? * MON-FRI *)
+            Name: nant-watch-open
+            ScheduleExpression: cron(30 9 ? * MON-FRI *)
             ScheduleExpressionTimezone: America/New_York
-            Input: '{"source": "schedule"}'
+            Input: '{"source": "schedule", "mode": "open"}'
+        RaceUpdates:
+          Type: ScheduleV2
+          Properties:
+            Name: nant-watch-race
+            ScheduleExpression: cron(0 11,12,14 ? * MON-FRI *)
+            ScheduleExpressionTimezone: America/New_York
+            Input: '{"source": "schedule", "mode": "race"}'
+        MarketClose:
+          Type: ScheduleV2
+          Properties:
+            Name: nant-watch-close
+            ScheduleExpression: cron(0 16 ? * MON-FRI *)
+            ScheduleExpressionTimezone: America/New_York
+            Input: '{"source": "schedule", "mode": "close"}'
 
   WeeklyFunction:
     Type: AWS::Serverless::Function
@@ -52,10 +70,6 @@ Resources:
       Timeout: 600
       EventInvokeConfig:
         MaximumRetryAttempts: 0
-      Environment:
-        Variables:
-          SPARTICUS_KEY_ID_PARAM: /nant-watch/sparticus_key_id
-          SPARTICUS_SECRET_KEY_PARAM: /nant-watch/sparticus_secret_key
       Policies:
         - Statement:
             - Sid: ReadOnlyTheFiveSecretsWeNeed
@@ -102,7 +116,7 @@ Resources:
     Type: AWS::CloudWatch::Alarm
     Properties:
       AlarmName: nant-watch-daily-errors
-      AlarmDescription: The NantWatch daily Lambda failed. Check /aws/lambda/nant-watch-daily
+      AlarmDescription: A NantWatch weekday run failed. Check /aws/lambda/nant-watch-daily
       Namespace: AWS/Lambda
       MetricName: Errors
       Dimensions:
@@ -140,7 +154,7 @@ Resources:
 
 Outputs:
   DailyFunctionName:
-    Description: Lambda that builds and posts the daily breakdown
+    Description: Lambda that builds and posts the five weekday posts
     Value:
       Ref: DailyFunction
   WeeklyFunctionName:
@@ -148,7 +162,7 @@ Outputs:
     Value:
       Ref: WeeklyFunction
   DailyLogGroupName:
-    Description: Where the daily run logs go
+    Description: Where the weekday run logs go
     Value:
       Ref: DailyLogGroup
   WeeklyLogGroupName:

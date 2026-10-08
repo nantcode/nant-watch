@@ -15,7 +15,7 @@ I run two paper-trading bots (NantBot on AWS, Sparticus on my Mac) and wanted on
 
 Two scheduled Lambdas in one SAM stack (see the diagram in the README):
 
-1. **EventBridge Scheduler** fires in New York time (weekdays 5:15 PM, Saturdays 9:00 AM).
+1. **EventBridge Scheduler** fires in New York time (weekdays 9:30 AM, 11 AM, 12 PM, 2 PM and 4:00 PM; Saturdays 9:00 AM).
 2. The **Lambda** loads its secrets from **SSM** in one call, then reads Alpaca's market calendar, asset list (~14,400 assets, ~12,300 eligible) and daily SIP bars in batches of 200 symbols.
 3. Pure functions filter (price >= $5, average volume >= 500K shares), rank, and format the report under Discord's 2,000-character limit.
 4. The report is posted to a **Discord webhook**. Failures post a warning to Discord *and* trip a **CloudWatch alarm** that emails me through **SNS**.
@@ -24,7 +24,7 @@ Two scheduled Lambdas in one SAM stack (see the diagram in the README):
 
 | Decision | Alternatives I considered | Why I chose it |
 |---|---|---|
-| Lambda + EventBridge Scheduler | EC2 cron, ECS task | Runs ~23 times a month; pay-per-use, no OS to patch |
+| Lambda + EventBridge Scheduler | EC2 cron, ECS task | Runs ~110 times a month; pay-per-use, no OS to patch |
 | Scheduler timezone `America/New_York` | UTC cron | Daylight saving is handled by AWS, not by me twice a year |
 | SSM SecureString | Secrets Manager | Free for standard parameters; rotation isn't needed for paper keys |
 | Standard library only | `requests`, `alpaca-py` | No dependencies to patch, tiny package, builds anywhere |
@@ -32,11 +32,12 @@ Two scheduled Lambdas in one SAM stack (see the diagram in the README):
 | Batch 200 symbols per request, 180 requests/min limiter | One request per symbol | ~62 requests instead of ~12,300; stays under the free plan's 200/min |
 | Omit `end` on bar requests | Request "now" | The free plan forbids SIP data newer than 15 minutes; letting Alpaca pick the end time avoids that error |
 | `adjustment=split` | Raw prices | A 10:1 split would otherwise look like a -90% "top loser" |
+| Live race = account value now (5-minute portfolio history) vs SPY 15 minutes ago | Paid real-time data | Free; the post says exactly how fresh each number is |
 | No Lambda async retries | Default 2 retries | A failed run alerts once instead of retrying and possibly double-posting; the client already retries API calls with backoff |
 
 ## 4. Security
 
-- **Least privilege per function:** the daily Lambda can call `ssm:GetParameters` on exactly 3 parameter ARNs; the weekly one on exactly 5. There are no wildcards.
+- **Least privilege per function:** each Lambda can call `ssm:GetParameters` on exactly 5 parameter ARNs. There are no wildcards.
 - **Secrets never touch git, logs or Discord:** they're fetched at runtime, the secret key is masked out of error messages, and the alert email address is a CloudFormation dynamic reference to SSM, so it isn't in the repo either.
 - **Defense in depth on "never trade":** a GET-only transport, a path allowlist, and a block on any path containing "order" or "position".
 - **Discord safety:** `allowed_mentions: {parse: []}` means a post can never ping `@everyone`.
@@ -51,13 +52,13 @@ Two scheduled Lambdas in one SAM stack (see the diagram in the README):
 
 ## 6. Testing
 
-- **137 unit tests** run in about a second, with no AWS, no network and no secrets. They use dependency injection: fake clients, a fake clock, fake SSM, fake Discord.
+- **153 unit tests** run in about a second, with no AWS, no network and no secrets. They use dependency injection: fake clients, a fake clock, fake SSM, fake Discord.
 - **GitHub Actions** runs the suite on Python 3.9 (my Mac) and 3.12 (Lambda) on every push.
 - Hand-written New York time conversion, verified against Python's `zoneinfo` for every hour from 2024 to 2030.
 
 ## 7. Cost
 
-All usage sits inside the AWS free tier: about 23 Lambda runs a month, 2 alarms, standard SSM parameters, and a handful of SNS emails. Alpaca's free market-data plan covers the data.
+All usage sits inside the AWS free tier: about 110 Lambda runs a month, 2 alarms, standard SSM parameters, and a handful of SNS emails. Alpaca's free market-data plan covers the data.
 
 ## 8. What I'd do next
 

@@ -110,8 +110,18 @@ def format_scoreboard(racers: Sequence[Racer], start_label: str, as_of_label: st
 
 # ---------- gathering the data ----------
 
+def account_series(client, intraday: bool = False) -> List[Tuple[date, float]]:
+    """Daily closing values for the whole race. With intraday=True, today's
+    latest 5-minute value is laid on top, so the scoreboard is live."""
+    by_day = dict(equity_series(client.get_portfolio_history()))
+    if intraday:
+        by_day.update(equity_series(client.get_portfolio_history(period="1D", timeframe="5Min")))
+    return sorted(by_day.items())
+
+
 def collect_racers(accounts: Dict[str, object], market_client, trading_days: Sequence[date],
-                   race_start: date = RACE_START) -> Tuple[List[Racer], List[str], date]:
+                   race_start: date = RACE_START,
+                   intraday: bool = False) -> Tuple[List[Racer], List[str], date]:
     """accounts maps a bot name to its own read-only AlpacaClient (or None if we
     have no keys for it). Returns (racers, names with no data, base_day)."""
     base_day = race_base_day(trading_days, race_start)
@@ -123,7 +133,7 @@ def collect_racers(accounts: Dict[str, object], market_client, trading_days: Seq
         racer = None
         if client is not None:
             try:
-                racer = racer_from_series(name, equity_series(client.get_portfolio_history()), base_day)
+                racer = racer_from_series(name, account_series(client, intraday), base_day)
             except AlpacaError:
                 racer = None
         if racer is None:
@@ -140,9 +150,11 @@ def collect_racers(accounts: Dict[str, object], market_client, trading_days: Seq
 
 
 def build_scoreboard(accounts: Dict[str, object], market_client, trading_days: Sequence[date],
-                     race_start: date = RACE_START) -> Tuple[str, List[Racer]]:
+                     race_start: date = RACE_START, intraday: bool = False,
+                     as_of_label: Optional[str] = None) -> Tuple[str, List[Racer]]:
     """Everything in one call: (Discord section text, racers for logging)."""
-    racers, missing, _ = collect_racers(accounts, market_client, trading_days, race_start)
+    racers, missing, _ = collect_racers(accounts, market_client, trading_days, race_start, intraday)
     as_of = max((r.end_day for r in racers), default=race_start)
-    text = format_scoreboard(racers, fmt_date_label(race_start), fmt_date_label(as_of), missing)
+    text = format_scoreboard(racers, fmt_date_label(race_start),
+                             as_of_label or fmt_date_label(as_of), missing)
     return text, racers

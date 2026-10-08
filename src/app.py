@@ -17,6 +17,7 @@ from alpaca_client import AlpacaClient
 from discord_post import post_messages
 from scanner import build_daily, load_trading_days, pick_report_day
 from weekly import build_weekly
+from sessions import MODES, build_session_post, load_session_calendar
 
 # secret name -> environment variable that holds its SSM parameter path
 REQUIRED_PARAMS = {
@@ -98,6 +99,8 @@ def run_daily(
 ) -> dict:
     """The whole daily job. Every outside dependency is a parameter,
     so the tests can swap in fakes for Alpaca, Discord and the clock."""
+    if event.get("mode"):   # v1.1 weekday schedule: open / race / close
+        return run_weekday(event, now_utc, secrets, make_client, poster, log)
     client = make_client(secrets["key_id"], secrets["secret_key"])
     now_et = eastern_now(now_utc)
     trading_days = load_trading_days(client, now_et.date())
@@ -120,6 +123,53 @@ def run_daily(
     log(f"posted {len(messages)} message(s), Discord said {statuses}")
     return {"status": "posted", "day": report_day.isoformat(),
             "summary": result.summary(), "discord": statuses}
+
+
+# ---------- the weekday schedule (v1.1): open review, race updates, close review ----------
+
+def make_accounts(secrets: Dict[str, str], make_client: Callable[[str, str], object],
+                  log: Callable[[str], None]):
+    """NantBot's client (it also reads market data) + the racers for the scoreboard."""
+    nantbot = make_client(secrets["key_id"], secrets["secret_key"])
+    sparticus = None
+    if secrets.get("sparticus_key_id") and secrets.get("sparticus_secret_key"):
+        if secrets["sparticus_key_id"] == secrets["key_id"]:
+            log("WARNING: Sparticus and NantBot share one Alpaca account; their results will match")
+        sparticus = make_client(secrets["sparticus_key_id"], secrets["sparticus_secret_key"])
+    else:
+        log("no Sparticus keys in SSM, scoreboard shows NantBot vs SPY")
+    return nantbot, {"NantBot": nantbot, "Sparticus": sparticus}
+
+
+def run_weekday(
+    event: dict,
+    now_utc: datetime,
+    secrets: Dict[str, str],
+    make_client: Callable[[str, str], object] = AlpacaClient,
+    poster: Callable[[str, List[str]], List[int]] = post_messages,
+    log: Callable[[str], None] = print,
+) -> dict:
+    """One of the five weekday posts, picked by event['mode']: open, race or close."""
+    mode = event.get("mode", "close")
+    if mode not in MODES:
+        raise ValueError(f"unknown mode: {mode} (use one of {', '.join(MODES)})")
+    nantbot, accounts = make_accounts(secrets, make_client, log)
+    now_et = eastern_now(now_utc)
+    trading_days = load_session_calendar(nantbot, now_et.date())
+    if event.get("source") == "schedule" and now_et.date() not in trading_days:
+        log(f"{now_et.date()} is not a trading day, skipping the {mode} post")
+        return {"status": "skipped", "mode": mode, "day": now_et.date().isoformat()}
+
+    session_day = date.fromisoformat(event["date"]) if event.get("date") else None
+    messages, summary = build_session_post(mode, nantbot, accounts, trading_days, now_et, session_day)
+    log(summary)
+    if messages is None:
+        return {"status": "skipped", "mode": mode, "summary": summary}
+    if event.get("dry_run"):
+        return {"status": "dry_run", "mode": mode, "summary": summary, "messages": messages}
+    statuses = poster(secrets["webhook_url"], messages)
+    log(f"posted {len(messages)} {mode} message(s), Discord said {statuses}")
+    return {"status": "posted", "mode": mode, "summary": summary, "discord": statuses}
 
 
 # ---------- the weekly job (M7) ----------
