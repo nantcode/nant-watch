@@ -168,6 +168,12 @@ class AlpacaClient:
         """Market sessions between two dates (holidays are simply missing)."""
         return self._get(TRADING_BASE, "/v2/calendar", {"start": start.isoformat(), "end": end.isoformat()})
 
+    def get_portfolio_history(self, period: str = "1A", timeframe: str = "1D") -> dict:
+        """Daily account value (equity) for the account these keys belong to.
+        Read-only: this is the same data as the equity chart on Alpaca's dashboard."""
+        return self._get(TRADING_BASE, "/v2/account/portfolio/history",
+                         {"period": period, "timeframe": timeframe})
+
     def get_bars(
         self,
         symbols: Sequence[str],
