@@ -17,7 +17,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 
 - [x] M1 Foundation: formatting + Discord poster + tests (v0.1.0)
 - [x] M2 Market math (pure) (v0.2.0)
-- [ ] M3 Read-only Alpaca client
+- [x] M3 Read-only Alpaca client (v0.3.0)
 - [ ] M4 Market scanner (local run)
 - [ ] M5 Daily breakdown on AWS
 - [ ] M6 Race scoreboard
