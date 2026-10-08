@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: NantWatch (Project 4) - read-only market breakdowns posted to Discord. Never places orders.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Architectures:
+      - arm64
+    MemorySize: 512
+    CodeUri: src/
+    Environment:
+      Variables:
+        ALPACA_KEY_ID_PARAM: /nant-trading-bot/alpaca_key_id
+        ALPACA_SECRET_KEY_PARAM: /nant-trading-bot/alpaca_secret_key
+        DISCORD_WEBHOOK_PARAM: /nant-watch/discord_webhook_url
+
+Resources:
+  DailyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: nant-watch-daily
+      Description: Weekday end-of-day market breakdown to Discord (read-only)
+      Handler: app.daily_handler
+      Timeout: 300
+      Policies:
+        - Statement:
+            - Sid: ReadOnlyTheThreeSecretsWeNeed
+              Effect: Allow
+              Action: ssm:GetParameters
+              Resource:
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_key_id
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_secret_key
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/discord_webhook_url
+      Events:
+        WeekdayAfterClose:
+          Type: ScheduleV2
+          Properties:
+            Name: nant-watch-daily
+            ScheduleExpression: cron(15 17 ? * MON-FRI *)
+            ScheduleExpressionTimezone: America/New_York
+            Input: '{"source": "schedule"}'
+
+  DailyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/nant-watch-daily
+      RetentionInDays: 14
+
+Outputs:
+  DailyFunctionName:
+    Description: Lambda that builds and posts the daily breakdown
+    Value:
+      Ref: DailyFunction
+  DailyLogGroupName:
+    Description: Where the daily run logs go
+    Value:
+      Ref: DailyLogGroup
