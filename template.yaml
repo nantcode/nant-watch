@@ -23,6 +23,8 @@ Resources:
       Description: Weekday end-of-day market breakdown to Discord (read-only)
       Handler: app.daily_handler
       Timeout: 300
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0   # a failed run alerts once instead of retrying and double-posting
       Policies:
         - Statement:
             - Sid: ReadOnlyTheThreeSecretsWeNeed
@@ -48,6 +50,8 @@ Resources:
       Description: Saturday weekly breakdown + race scoreboard to Discord (read-only)
       Handler: app.weekly_handler
       Timeout: 600
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       Environment:
         Variables:
           SPARTICUS_KEY_ID_PARAM: /nant-watch/sparticus_key_id
@@ -84,6 +88,56 @@ Resources:
       LogGroupName: /aws/lambda/nant-watch-weekly
       RetentionInDays: 14
 
+  # ---------- M8: alarms that email you when a run fails ----------
+
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: nant-watch-alerts
+      Subscription:
+        - Protocol: email
+          Endpoint: '{{resolve:ssm:/nant-watch/alert_email}}'   # kept in SSM so your email never lands in git
+
+  DailyErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: nant-watch-daily-errors
+      AlarmDescription: The NantWatch daily Lambda failed. Check /aws/lambda/nant-watch-daily
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: DailyFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlertsTopic
+
+  WeeklyErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: nant-watch-weekly-errors
+      AlarmDescription: The NantWatch weekly Lambda failed. Check /aws/lambda/nant-watch-weekly
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value:
+            Ref: WeeklyFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: AlertsTopic
+
 Outputs:
   DailyFunctionName:
     Description: Lambda that builds and posts the daily breakdown
@@ -101,3 +155,7 @@ Outputs:
     Description: Where the weekly run logs go
     Value:
       Ref: WeeklyLogGroup
+  AlertsTopicArn:
+    Description: SNS topic that emails you when a run fails
+    Value:
+      Ref: AlertsTopic

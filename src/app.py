@@ -162,17 +162,47 @@ def run_weekly(
     return {"status": "posted", "week": week, "summary": result.summary(), "discord": statuses}
 
 
+# ---------- failure alerts (M8) ----------
+
+def alert_text(job: str, error: Exception, now_et: datetime) -> str:
+    """The Discord message we post when a run crashes. Short, no secrets."""
+    detail = f"{type(error).__name__}: {error}".replace("`", "'")
+    if len(detail) > 300:
+        detail = detail[:297] + "..."
+    when = f"{now_et:%a %b} {now_et.day}, {now_et:%I:%M %p} ET"
+    return (f"⚠️ **NantWatch {job} run failed** · {when}\n"
+            f"```\n{detail}\n```\n"
+            f"Logs: /aws/lambda/nant-watch-{job}")
+
+
+def run_with_alert(job: str, job_fn: Callable[..., dict], event: dict, now_utc: datetime,
+                   secrets: Dict[str, str], poster: Optional[Callable] = None,
+                   log: Optional[Callable[[str], None]] = None) -> dict:
+    """Run a job. If it crashes: log it, post a warning to Discord, then re-raise
+    so Lambda still records the error (that's what trips the CloudWatch alarm)."""
+    log = log or print
+    try:
+        return job_fn(event, now_utc, secrets)
+    except Exception as error:
+        log(f"ERROR: {job} run failed: {type(error).__name__}: {error}")
+        try:
+            (poster or post_messages)(secrets["webhook_url"], [alert_text(job, error, eastern_now(now_utc))])
+        except Exception as alert_error:
+            log(f"could not post the failure alert either: {type(alert_error).__name__}")
+        raise
+
+
 # ---------- what Lambda calls ----------
 
 def daily_handler(event, context):
     import boto3  # only exists inside Lambda; imported here so local tests never need it
 
     secrets = secrets_from_ssm(boto3.client("ssm"), os.environ)
-    return run_daily(event or {}, datetime.now(timezone.utc), secrets)
+    return run_with_alert("daily", run_daily, event or {}, datetime.now(timezone.utc), secrets)
 
 
 def weekly_handler(event, context):
     import boto3
 
     secrets = secrets_from_ssm(boto3.client("ssm"), os.environ)
-    return run_weekly(event or {}, datetime.now(timezone.utc), secrets)
+    return run_with_alert("weekly", run_weekly, event or {}, datetime.now(timezone.utc), secrets)
