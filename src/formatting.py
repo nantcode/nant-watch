@@ -1,4 +1,4 @@
-"""Pure formatting helpers for BreakdownBot's Discord posts.
+"""Pure formatting helpers for NantWatch's Discord posts.
 
 Every function here is a *pure function*: the same input always gives the
 same output, and nothing touches the network, AWS, files, or the clock.
@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import List, Sequence
 
-BOT_NAME = "BreakdownBot"
+BOT_NAME = "NantWatch"
 DISCORD_HARD_LIMIT = 2000   # Discord rejects any message longer than this
 SAFE_LIMIT = 1900           # we aim lower to leave headroom (emoji, edits)
 CODE_FENCE = "```"

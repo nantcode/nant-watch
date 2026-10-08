@@ -3,7 +3,7 @@
 
 Run from the project root:
     python3 scripts/send_preview.py --dry-run   # print only, no network
-    python3 scripts/send_preview.py             # print AND post (needs BREAKDOWN_WEBHOOK_URL)
+    python3 scripts/send_preview.py             # print AND post (needs NANTWATCH_WEBHOOK_URL)
 """
 import argparse
 import os
@@ -36,7 +36,7 @@ SAMPLE_LOSERS = [
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Preview BreakdownBot's daily post")
+    parser = argparse.ArgumentParser(description="Preview NantWatch's daily post")
     parser.add_argument("--dry-run", action="store_true", help="print only, don't post")
     args = parser.parse_args()
 
@@ -51,9 +51,9 @@ def main() -> int:
         print("\nDry run: nothing was sent.")
         return 0
 
-    webhook_url = os.environ.get("BREAKDOWN_WEBHOOK_URL", "").strip()
+    webhook_url = os.environ.get("NANTWATCH_WEBHOOK_URL", "").strip()
     if not webhook_url.startswith("https://"):
-        print("\nERROR: set BREAKDOWN_WEBHOOK_URL first (see Step 1.6).", file=sys.stderr)
+        print("\nERROR: set NANTWATCH_WEBHOOK_URL first (see Step 1.6).", file=sys.stderr)
         return 1
 
     statuses = post_messages(webhook_url, messages)

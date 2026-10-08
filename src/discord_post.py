@@ -14,7 +14,7 @@ from formatting import BOT_NAME, DISCORD_HARD_LIMIT
 
 # Discord sits behind Cloudflare, which blocks Python's default
 # "Python-urllib/3.x" User-Agent (you'd get HTTP 403, error 1010).
-USER_AGENT = "BreakdownBot/0.1 (+https://github.com/nantcode/breakdown-bot)"
+USER_AGENT = "NantWatch/0.1 (+https://github.com/nantcode/nant-watch)"
 
 
 def build_payload(content: str, username: str = BOT_NAME) -> dict:

@@ -1,4 +1,4 @@
-# BreakdownBot (Project 4)
+# NantWatch (Project 4)
 
 Read-only market recap bot for my Background Workforce. Posts to its own Discord channel:
 

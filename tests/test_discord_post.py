@@ -12,7 +12,7 @@ class TestBuildPayload(unittest.TestCase):
         payload = build_payload("hello @everyone")
         self.assertEqual(payload["content"], "hello @everyone")
         self.assertEqual(payload["allowed_mentions"], {"parse": []})
-        self.assertEqual(payload["username"], "BreakdownBot")
+        self.assertEqual(payload["username"], "NantWatch")
 
     def test_payload_is_json_serializable(self):
         json.dumps(build_payload("📊 test"))
