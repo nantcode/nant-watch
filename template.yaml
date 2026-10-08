@@ -41,10 +41,47 @@ Resources:
             ScheduleExpressionTimezone: America/New_York
             Input: '{"source": "schedule"}'
 
+  WeeklyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: nant-watch-weekly
+      Description: Saturday weekly breakdown + race scoreboard to Discord (read-only)
+      Handler: app.weekly_handler
+      Timeout: 600
+      Environment:
+        Variables:
+          SPARTICUS_KEY_ID_PARAM: /nant-watch/sparticus_key_id
+          SPARTICUS_SECRET_KEY_PARAM: /nant-watch/sparticus_secret_key
+      Policies:
+        - Statement:
+            - Sid: ReadOnlyTheFiveSecretsWeNeed
+              Effect: Allow
+              Action: ssm:GetParameters
+              Resource:
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_key_id
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-trading-bot/alpaca_secret_key
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/discord_webhook_url
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_key_id
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_secret_key
+      Events:
+        SaturdayMorning:
+          Type: ScheduleV2
+          Properties:
+            Name: nant-watch-weekly
+            ScheduleExpression: cron(0 9 ? * SAT *)
+            ScheduleExpressionTimezone: America/New_York
+            Input: '{"source": "schedule"}'
+
   DailyLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: /aws/lambda/nant-watch-daily
+      RetentionInDays: 14
+
+  WeeklyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/lambda/nant-watch-weekly
       RetentionInDays: 14
 
 Outputs:
@@ -52,7 +89,15 @@ Outputs:
     Description: Lambda that builds and posts the daily breakdown
     Value:
       Ref: DailyFunction
+  WeeklyFunctionName:
+    Description: Lambda that builds and posts the weekly breakdown + race scoreboard
+    Value:
+      Ref: WeeklyFunction
   DailyLogGroupName:
     Description: Where the daily run logs go
     Value:
       Ref: DailyLogGroup
+  WeeklyLogGroupName:
+    Description: Where the weekly run logs go
+    Value:
+      Ref: WeeklyLogGroup

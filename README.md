@@ -28,5 +28,5 @@ Secrets live in SSM Parameter Store (SecureString); the Lambda can read only the
 - [x] M4 Market scanner (local run) (v0.4.0)
 - [x] M5 Daily breakdown on AWS (v0.5.0)
 - [x] M6 Race scoreboard (v0.6.0)
-- [ ] M7 Weekly breakdown on AWS
+- [x] M7 Weekly breakdown on AWS (v0.7.0)
 - [ ] M8 Hardening + portfolio write-up (v1.0.0)
