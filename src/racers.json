@@ -1,0 +1,13 @@
+{
+  "racers": [
+    {
+      "name": "NantBot",
+      "main": true
+    },
+    {
+      "name": "Sparticus",
+      "key_id_param": "/nant-watch/sparticus_key_id",
+      "secret_key_param": "/nant-watch/sparticus_secret_key"
+    }
+  ]
+}

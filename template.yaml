@@ -14,8 +14,7 @@ Globals:
         ALPACA_KEY_ID_PARAM: /nant-trading-bot/alpaca_key_id
         ALPACA_SECRET_KEY_PARAM: /nant-trading-bot/alpaca_secret_key
         DISCORD_WEBHOOK_PARAM: /nant-watch/discord_webhook_url
-        SPARTICUS_KEY_ID_PARAM: /nant-watch/sparticus_key_id
-        SPARTICUS_SECRET_KEY_PARAM: /nant-watch/sparticus_secret_key
+        # racers' key paths come from src/racers.json
 
 Resources:
   DailyFunction:
@@ -29,7 +28,7 @@ Resources:
         MaximumRetryAttempts: 0   # a failed run alerts once instead of retrying and double-posting
       Policies:
         - Statement:
-            - Sid: ReadOnlyTheFiveSecretsWeNeed
+            - Sid: ReadOnlyOurSecretsAndRacerKeys
               Effect: Allow
               Action: ssm:GetParameters
               Resource:
@@ -38,6 +37,7 @@ Resources:
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/discord_webhook_url
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_key_id
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_secret_key
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/racers/*   # default racer key paths
       Events:
         MarketOpen:
           Type: ScheduleV2
@@ -72,7 +72,7 @@ Resources:
         MaximumRetryAttempts: 0
       Policies:
         - Statement:
-            - Sid: ReadOnlyTheFiveSecretsWeNeed
+            - Sid: ReadOnlyOurSecretsAndRacerKeys
               Effect: Allow
               Action: ssm:GetParameters
               Resource:
@@ -81,6 +81,7 @@ Resources:
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/discord_webhook_url
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_key_id
                 - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/sparticus_secret_key
+                - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/nant-watch/racers/*   # default racer key paths
       Events:
         SaturdayMorning:
           Type: ScheduleV2

@@ -4,7 +4,8 @@
     python3 scripts/race_local.py --post   # print AND post to Discord
 
 Needs APCA_API_KEY_ID / APCA_API_SECRET_KEY (NantBot's account).
-Optional: SPARTICUS_KEY_ID / SPARTICUS_SECRET_KEY (Sparticus's account).
+Every other racer in src/racers.json reads its keys from <NAME>_KEY_ID /
+<NAME>_SECRET_KEY (e.g. SPARTICUS_KEY_ID), or the env names its entry sets.
 NANTWATCH_WEBHOOK_URL is needed only for --post.
 """
 import argparse
@@ -18,7 +19,7 @@ from alpaca_client import AlpacaClient  # noqa: E402
 from discord_post import post_messages  # noqa: E402
 from formatting import fmt_pct, fmt_price, pack_messages  # noqa: E402
 from market_math import trading_days_from_calendar  # noqa: E402
-from race import RACE_START, build_scoreboard  # noqa: E402
+from race import RACE_START, build_scoreboard, load_entrants, make_race_accounts  # noqa: E402
 
 
 def env(name: str) -> str:
@@ -35,18 +36,12 @@ def main() -> int:
         return 1
     nantbot = AlpacaClient(env("APCA_API_KEY_ID"), env("APCA_API_SECRET_KEY"))
 
-    sparticus = None
-    if env("SPARTICUS_KEY_ID") and env("SPARTICUS_SECRET_KEY"):
-        if env("SPARTICUS_KEY_ID") == env("APCA_API_KEY_ID"):
-            print("WARNING: Sparticus uses the SAME Alpaca account as NantBot, so their results "
-                  "can't be told apart. Give Sparticus its own paper account to race properly.")
-        sparticus = AlpacaClient(env("SPARTICUS_KEY_ID"), env("SPARTICUS_SECRET_KEY"))
-    else:
-        print("Note: no Sparticus keys found, so the board shows NantBot vs SPY only.")
+    entrants = load_entrants()
+    keys = {e.name: (env(e.key_id_env), env(e.secret_key_env)) for e in entrants if not e.main}
+    accounts = make_race_accounts(entrants, nantbot, env("APCA_API_KEY_ID"), keys, AlpacaClient, print)
 
     calendar = nantbot.get_calendar(RACE_START - timedelta(days=14), date.today())
-    text, racers = build_scoreboard({"NantBot": nantbot, "Sparticus": sparticus},
-                                    nantbot, trading_days_from_calendar(calendar))
+    text, racers = build_scoreboard(accounts, nantbot, trading_days_from_calendar(calendar))
 
     for racer in racers:
         print(f"  {racer.name:<10} {fmt_price(racer.start_value):>13} -> {fmt_price(racer.end_value):>13}"
