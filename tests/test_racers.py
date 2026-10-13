@@ -20,12 +20,12 @@ def config(*racers):
 
 
 class TestShippedConfig(unittest.TestCase):
-    def test_racers_json_keeps_todays_lineup(self):
+    def test_racers_json_is_valid_and_keeps_nantbot_as_main(self):
+        # Guards the deploy: a broken racers.json fails CI instead of stopping the scheduled posts.
         entrants = load_entrants()
-        self.assertEqual([e.name for e in entrants], ["NantBot", "Sparticus"])
-        self.assertTrue(entrants[0].main)
-        self.assertEqual(entrants[1].key_id_param, "/nant-watch/sparticus_key_id")
-        self.assertEqual(entrants[1].secret_key_param, "/nant-watch/sparticus_secret_key")
+        self.assertEqual([e.name for e in entrants if e.main], ["NantBot"])
+        sparticus = next(e for e in entrants if e.name == "Sparticus")
+        self.assertEqual(sparticus.key_id_param, "/nant-watch/sparticus_key_id")
 
     def test_racers_json_ships_with_the_lambda_code(self):
         self.assertEqual(os.path.basename(os.path.dirname(RACERS_FILE)), "src")
@@ -48,6 +48,10 @@ class TestParseEntrants(unittest.TestCase):
         self.assertEqual((entrant.key_id_param, entrant.secret_key_param), ("/x/id", "/x/sk"))
         self.assertEqual((entrant.key_id_env, entrant.secret_key_env), ("ZK", "ZS"))
 
+    def test_friendly_names_are_allowed(self):
+        names = [e.name for e in parse_entrants(config({"name": "Bot-2.0"}, {"name": "my_bot"}, {"name": "Ace Bot"}))]
+        self.assertEqual(names, ["Bot-2.0", "my_bot", "Ace Bot"])
+
     def test_name_is_trimmed(self):
         self.assertEqual(parse_entrants(config({"name": "  Zed "}))[0].name, "Zed")
 
@@ -60,6 +64,11 @@ class TestParseEntrants(unittest.TestCase):
             "needs a name ": config({"name": "   "}),
             "longer than 10": config({"name": "WayTooLongName"}),
             "letter or digit": config({"name": "!!!"}),
+            "may only use": config({"name": "a`b"}),
+            "may only use ": config({"name": "**bold**"}),
+            "may only use  ": config({"name": "<@123>"}),
+            "may only use   ": config({"name": "_x"}),
+            "at most 15 racers": config(*({"name": f"R{i}"} for i in range(16))),
             "benchmark": config({"name": "spy"}),
             "unique": config({"name": "Zed"}, {"name": "zed"}),
             "only one racer can be the main": config({"name": "A", "main": True}, {"name": "B", "main": True}),

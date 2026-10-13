@@ -49,11 +49,12 @@ flowchart LR
 
 Racers are listed in [src/racers.json](src/racers.json). To enter a bot:
 
-1. Add an entry with its name (10 characters max, unique, not `SPY`):
+1. Add an entry with its name (10 characters max, unique, not `SPY`; letters, digits, spaces and `. _ -`; 15 racers max):
 
        {"name": "Rocket"}
 
-2. Store a **read-only** Alpaca key pair for its account in SSM:
+2. Store an Alpaca **paper** key pair for its account in SSM. Alpaca keys can trade, so only take keys for paper
+   accounts; NantWatch itself only ever sends GET requests:
 
        aws ssm put-parameter --type SecureString --name /nant-watch/racers/rocket/key_id     --value ...
        aws ssm put-parameter --type SecureString --name /nant-watch/racers/rocket/secret_key --value ...
