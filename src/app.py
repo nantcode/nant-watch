@@ -15,6 +15,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Sequence
 
 from alpaca_client import AlpacaClient
 from discord_post import post_messages
+from race import Entrant, load_entrants, make_race_accounts
 from scanner import build_daily, load_trading_days, pick_report_day
 from weekly import build_weekly
 from sessions import MODES, build_session_post, load_session_calendar
@@ -25,10 +26,7 @@ REQUIRED_PARAMS = {
     "secret_key": "ALPACA_SECRET_KEY_PARAM",
     "webhook_url": "DISCORD_WEBHOOK_PARAM",
 }
-OPTIONAL_PARAMS = {
-    "sparticus_key_id": "SPARTICUS_KEY_ID_PARAM",
-    "sparticus_secret_key": "SPARTICUS_SECRET_KEY_PARAM",
-}
+SSM_BATCH = 10   # GetParameters takes at most 10 names per call
 
 
 # ---------- New York time without any extra packages ----------
@@ -56,22 +54,40 @@ def eastern_now(now_utc: datetime) -> datetime:
 # ---------- secrets ----------
 
 def load_secrets(ssm, names: Sequence[str], optional: Sequence[str] = ()) -> Dict[str, str]:
-    """Fetch all secrets in ONE SSM call. A missing required secret fails loudly;
-    a missing optional one (e.g. Sparticus keys you haven't stored) is skipped."""
-    response = ssm.get_parameters(Names=list(names), WithDecryption=True)
-    missing = [n for n in (response.get("InvalidParameters") or []) if n not in optional]
+    """Fetch all secrets in as few SSM calls as possible (10 names per call).
+    A missing required secret fails loudly; a missing optional one (e.g. a
+    racer's keys you haven't stored yet) is skipped."""
+    names = list(dict.fromkeys(names))
+    values: Dict[str, str] = {}
+    invalid: List[str] = []
+    for start in range(0, len(names), SSM_BATCH):
+        response = ssm.get_parameters(Names=names[start:start + SSM_BATCH], WithDecryption=True)
+        invalid.extend(response.get("InvalidParameters") or [])
+        values.update({p["Name"]: p["Value"] for p in response["Parameters"]})
+    missing = [n for n in invalid if n not in optional]
     if missing:
         raise RuntimeError(f"missing SSM parameters: {missing}")
-    return {p["Name"]: p["Value"] for p in response["Parameters"]}
+    return values
 
 
-def secrets_from_ssm(ssm, environ: Mapping[str, str]) -> Dict[str, str]:
-    """Read the SSM paths from environment variables, then fetch them all at once.
-    Returns friendly keys like 'key_id', 'webhook_url', 'sparticus_key_id'."""
+def racer_params(entrants: Sequence[Entrant]) -> Dict[str, str]:
+    """Secret key -> SSM path for every racer that brings its own keys."""
+    params: Dict[str, str] = {}
+    for entrant in entrants:
+        if not entrant.main:
+            params[entrant.key_id_secret] = entrant.key_id_param
+            params[entrant.secret_key_secret] = entrant.secret_key_param
+    return params
+
+
+def secrets_from_ssm(ssm, environ: Mapping[str, str],
+                     entrants: Optional[Sequence[Entrant]] = None) -> Dict[str, str]:
+    """Read the SSM paths from environment variables and racers.json, then fetch
+    them all at once. Returns friendly keys like 'key_id', 'webhook_url', 'sparticus_key_id'."""
     required = {key: environ[var] for key, var in REQUIRED_PARAMS.items()}
-    optional = {key: environ[var] for key, var in OPTIONAL_PARAMS.items() if environ.get(var)}
+    optional = racer_params(load_entrants() if entrants is None else entrants)
     values = load_secrets(ssm, list(required.values()) + list(optional.values()),
-                          optional=list(optional.values()))
+                          optional=[n for n in optional.values() if n not in required.values()])
     secrets = {key: values[name] for key, name in required.items()}
     secrets.update({key: values[name] for key, name in optional.items() if name in values})
     return secrets
@@ -128,17 +144,13 @@ def run_daily(
 # ---------- the weekday schedule (v1.1): open review, race updates, close review ----------
 
 def make_accounts(secrets: Dict[str, str], make_client: Callable[[str, str], object],
-                  log: Callable[[str], None]):
-    """NantBot's client (it also reads market data) + the racers for the scoreboard."""
+                  log: Callable[[str], None], entrants: Optional[Sequence[Entrant]] = None):
+    """NantBot's client (it also reads market data) + every racer in racers.json."""
+    entrants = load_entrants() if entrants is None else entrants
     nantbot = make_client(secrets["key_id"], secrets["secret_key"])
-    sparticus = None
-    if secrets.get("sparticus_key_id") and secrets.get("sparticus_secret_key"):
-        if secrets["sparticus_key_id"] == secrets["key_id"]:
-            log("WARNING: Sparticus and NantBot share one Alpaca account; their results will match")
-        sparticus = make_client(secrets["sparticus_key_id"], secrets["sparticus_secret_key"])
-    else:
-        log("no Sparticus keys in SSM, scoreboard shows NantBot vs SPY")
-    return nantbot, {"NantBot": nantbot, "Sparticus": sparticus}
+    keys = {e.name: (secrets.get(e.key_id_secret, ""), secrets.get(e.secret_key_secret, ""))
+            for e in entrants if not e.main}
+    return nantbot, make_race_accounts(entrants, nantbot, secrets["key_id"], keys, make_client, log)
 
 
 def run_weekday(
@@ -183,18 +195,10 @@ def run_weekly(
     log: Callable[[str], None] = print,
 ) -> dict:
     """Weekly movers + race scoreboard. NantBot's keys also read market data."""
-    nantbot = make_client(secrets["key_id"], secrets["secret_key"])
-    sparticus = None
-    if secrets.get("sparticus_key_id") and secrets.get("sparticus_secret_key"):
-        if secrets["sparticus_key_id"] == secrets["key_id"]:
-            log("WARNING: Sparticus and NantBot share one Alpaca account; their results will match")
-        sparticus = make_client(secrets["sparticus_key_id"], secrets["sparticus_secret_key"])
-    else:
-        log("no Sparticus keys in SSM, scoreboard shows NantBot vs SPY")
+    nantbot, accounts = make_accounts(secrets, make_client, log)
 
     as_of = date.fromisoformat(event["date"]) if event.get("date") else None
-    built = build_weekly(nantbot, {"NantBot": nantbot, "Sparticus": sparticus},
-                         eastern_now(now_utc), as_of)
+    built = build_weekly(nantbot, accounts, eastern_now(now_utc), as_of)
     if built is None:
         log("no finished trading week found, skipping")
         return {"status": "skipped"}

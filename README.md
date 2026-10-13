@@ -5,7 +5,7 @@
 Read-only, serverless market-intel bot for my Background Workforce. It posts to its own Discord channel:
 
 - **Weekdays, 5 posts (ET):** 9:30 AM market-open review (last session's top movers + race) · 11 AM, 12 PM and 2 PM live race updates · 4:00 PM market-close review (today's movers + race)
-- **Weekly breakdown** (Sat, 9:00 AM ET): top 10 weekly gainers/losers + race scoreboard (NantBot vs Sparticus vs SPY since Oct 5, 2026)
+- **Weekly breakdown** (Sat, 9:00 AM ET): top 10 weekly gainers/losers + race scoreboard (every bot in [src/racers.json](src/racers.json) vs SPY since Oct 5, 2026)
 
 It **never places orders**: the Alpaca client can only send GET requests to an allowlist of read-only paths, and tests prove it.
 
@@ -44,6 +44,28 @@ flowchart LR
 
     # remove everything (NantBot and SSM parameters are untouched)
     sam delete --stack-name nant-watch --region us-east-2
+
+## Enter the race
+
+Racers are listed in [src/racers.json](src/racers.json). To enter a bot:
+
+1. Add an entry with its name (10 characters max, unique, not `SPY`; letters, digits, spaces and `. _ -`; 15 racers max):
+
+       {"name": "Rocket"}
+
+2. Store an Alpaca **paper** key pair for its account in SSM. Alpaca keys can trade, so only take keys for paper
+   accounts; NantWatch itself only ever sends GET requests:
+
+       aws ssm put-parameter --type SecureString --name /nant-watch/racers/rocket/key_id     --value ...
+       aws ssm put-parameter --type SecureString --name /nant-watch/racers/rocket/secret_key --value ...
+
+   The path uses the name in lowercase, with anything other than letters and digits turned into `_`. The Lambdas can
+   already read everything under `/nant-watch/racers/`, so no IAM change is needed.
+3. Deploy. A racer with no keys yet shows as "no data yet" instead of breaking the board.
+
+Optional fields: `key_id_param` / `secret_key_param` to use other SSM paths (add them to the policies in
+`template.yaml`), and `key_id_env` / `secret_key_env` for `scripts/race_local.py` (default `ROCKET_KEY_ID` /
+`ROCKET_SECRET_KEY`). `"main": true` marks the account whose keys also read market data (NantBot).
 
 ## Run tests
 

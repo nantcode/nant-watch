@@ -1,13 +1,16 @@
-"""Race scoreboard: NantBot vs Sparticus vs SPY since the race started.
+"""Race scoreboard: every bot in racers.json vs SPY since the race started.
 
 Everyone is measured the same way: from the CLOSE of the last session
 before the race (Fri Oct 2, 2026) to the latest close we have.
 Results are also shown as "what $10K at the start is worth now", so a
 $100k bot account and a $700 ETF can be compared fairly.
 """
+import json
+import os
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from alpaca_client import AlpacaError
 from formatting import CODE_FENCE, fmt_date_label, fmt_pct, fmt_price, section
@@ -17,6 +20,11 @@ RACE_START = date(2026, 10, 5)
 BENCHMARK = "SPY"
 STAKE = 10_000.0
 MEDALS = ("🥇", "🥈", "🥉")
+RACERS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "racers.json")
+NAME_WIDTH = 10            # the RACER column on the scoreboard
+MAX_RACERS = 15            # keeps the board inside one Discord message
+NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]*")   # nothing that can break Discord markdown
+SSM_PREFIX = "/nant-watch/racers"
 
 
 @dataclass(frozen=True)
@@ -34,6 +42,123 @@ class Racer:
     def stake_now(self) -> float:
         """What $10,000 invested at the start would be worth now."""
         return STAKE * self.end_value / self.start_value
+
+
+# ---------- who's racing: racers.json ----------
+
+@dataclass(frozen=True)
+class Entrant:
+    """One bot entered in the race. The main entrant is the account whose keys
+    also read market data (NantBot); everyone else brings their own Alpaca keys (used by our GET-only client)."""
+    name: str
+    main: bool = False
+    key_id_param: str = ""
+    secret_key_param: str = ""
+    key_id_env: str = ""
+    secret_key_env: str = ""
+
+    @property
+    def slug(self) -> str:
+        return slug_for(self.name)
+
+    @property
+    def key_id_secret(self) -> str:
+        """Key in the secrets dict, e.g. 'sparticus_key_id'."""
+        return f"{self.slug}_key_id"
+
+    @property
+    def secret_key_secret(self) -> str:
+        return f"{self.slug}_secret_key"
+
+
+def slug_for(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+
+
+def parse_entrants(config: dict) -> List[Entrant]:
+    """racers.json contents -> entrants, failing loudly on anything that would
+    break the scoreboard or mix up two accounts."""
+    raw = config.get("racers") if isinstance(config, dict) else None
+    if not isinstance(raw, list) or not raw:
+        raise ValueError("racers config needs a non-empty 'racers' list")
+    if len(raw) > MAX_RACERS:
+        raise ValueError(f"at most {MAX_RACERS} racers fit on the board, config has {len(raw)}")
+    known = {"name", "main", "key_id_param", "secret_key_param", "key_id_env", "secret_key_env"}
+    entrants: List[Entrant] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"racer #{i + 1} must be an object")
+        unknown = sorted(set(item) - known)
+        if unknown:
+            raise ValueError(f"racer #{i + 1} has unknown field(s): {', '.join(unknown)}")
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"racer #{i + 1} needs a name")
+        name = name.strip()
+        if len(name) > NAME_WIDTH:
+            raise ValueError(f"racer name {name!r} is longer than {NAME_WIDTH} characters")
+        if not NAME_PATTERN.fullmatch(name):
+            raise ValueError(f"racer name {name!r} may only use letters, digits, spaces and . _ -, "
+                             f"starting with a letter or digit")
+        if name.upper() == BENCHMARK:
+            raise ValueError(f"{BENCHMARK} is the benchmark and can't be entered as a racer")
+        main = item.get("main", False)
+        if not isinstance(main, bool):
+            raise ValueError(f"racer {name!r}: 'main' must be true or false")
+        for field in known - {"name", "main"}:
+            if field in item and (not isinstance(item[field], str) or not item[field].strip()):
+                raise ValueError(f"racer {name!r}: {field!r} must be a non-empty string")
+        slug = slug_for(name)
+        entrants.append(Entrant(
+            name=name,
+            main=main,
+            key_id_param=item.get("key_id_param", f"{SSM_PREFIX}/{slug}/key_id"),
+            secret_key_param=item.get("secret_key_param", f"{SSM_PREFIX}/{slug}/secret_key"),
+            key_id_env=item.get("key_id_env", f"{slug.upper()}_KEY_ID"),
+            secret_key_env=item.get("secret_key_env", f"{slug.upper()}_SECRET_KEY"),
+        ))
+    slugs = [e.slug for e in entrants]
+    dupes = sorted({e.name for e in entrants if slugs.count(e.slug) > 1})
+    if dupes:
+        raise ValueError(f"racer names must be unique: {', '.join(dupes)}")
+    if sum(e.main for e in entrants) > 1:
+        raise ValueError("only one racer can be the main account")
+    return entrants
+
+
+def load_entrants(path: str = RACERS_FILE) -> List[Entrant]:
+    with open(path, encoding="utf-8") as handle:
+        try:
+            config = json.load(handle)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"{os.path.basename(path)} is not valid JSON: {error}") from None
+    return parse_entrants(config)
+
+
+def make_race_accounts(entrants: Sequence[Entrant], main_client, main_key_id: str,
+                       keys: Dict[str, Tuple[str, str]],
+                       make_client: Callable[[str, str], object],
+                       log: Callable[[str], None]) -> Dict[str, object]:
+    """Entrants -> {name: read-only client, or None if we have no keys for it}.
+    keys maps an entrant's name to its (key_id, secret_key)."""
+    accounts: Dict[str, object] = {}
+    owner_of_key: Dict[str, str] = {}
+    for entrant in entrants:
+        if entrant.main:
+            accounts[entrant.name] = main_client
+            owner_of_key.setdefault(main_key_id, entrant.name)
+            continue
+        key_id, secret_key = keys.get(entrant.name, ("", ""))
+        if not key_id or not secret_key:
+            log(f"no {entrant.name} keys found, it shows as 'no data yet'")
+            accounts[entrant.name] = None
+            continue
+        if key_id == main_key_id or key_id in owner_of_key:
+            other = owner_of_key.get(key_id, "the main account")
+            log(f"WARNING: {entrant.name} and {other} share one Alpaca account; their results will match")
+        owner_of_key.setdefault(key_id, entrant.name)
+        accounts[entrant.name] = make_client(key_id, secret_key)
+    return accounts
 
 
 # ---------- turning Alpaca data into (day, value) series ----------

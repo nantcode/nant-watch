@@ -8,6 +8,7 @@ import app
 from app import run_weekly, secrets_from_ssm
 from formatting import SAFE_LIMIT, Mover
 from market_math import Window
+from race import Entrant
 from test_app import FakeSSM
 from test_race import FakeAccount, history
 from test_scanner import FakeClient, asset, bar
@@ -140,17 +141,17 @@ class TestRunWeekly(unittest.TestCase):
 
 
 class TestSecrets(unittest.TestCase):
-    ENV = {"ALPACA_KEY_ID_PARAM": "/k", "ALPACA_SECRET_KEY_PARAM": "/s", "DISCORD_WEBHOOK_PARAM": "/w",
-           "SPARTICUS_KEY_ID_PARAM": "/sk", "SPARTICUS_SECRET_KEY_PARAM": "/ss"}
+    ENV = {"ALPACA_KEY_ID_PARAM": "/k", "ALPACA_SECRET_KEY_PARAM": "/s", "DISCORD_WEBHOOK_PARAM": "/w"}
+    SK, SS = "/nant-watch/sparticus_key_id", "/nant-watch/sparticus_secret_key"   # from src/racers.json
 
     def test_optional_secrets_present(self):
-        ssm = FakeSSM({"/k": "K", "/s": "S", "/w": "W", "/sk": "SK", "/ss": "SS"})
+        ssm = FakeSSM({"/k": "K", "/s": "S", "/w": "W", self.SK: "SK", self.SS: "SS"})
         self.assertEqual(secrets_from_ssm(ssm, self.ENV),
                          {"key_id": "K", "secret_key": "S", "webhook_url": "W",
                           "sparticus_key_id": "SK", "sparticus_secret_key": "SS"})
 
     def test_optional_secrets_missing_is_fine(self):
-        ssm = FakeSSM({"/k": "K", "/s": "S", "/w": "W"}, invalid=["/sk", "/ss"])
+        ssm = FakeSSM({"/k": "K", "/s": "S", "/w": "W"}, invalid=[self.SK, self.SS])
         self.assertEqual(secrets_from_ssm(ssm, self.ENV), {"key_id": "K", "secret_key": "S", "webhook_url": "W"})
 
     def test_required_secret_missing_fails(self):
@@ -158,15 +159,14 @@ class TestSecrets(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             secrets_from_ssm(ssm, self.ENV)
 
-    def test_daily_function_without_sparticus_env_asks_for_three(self):
-        env = {k: v for k, v in self.ENV.items() if not k.startswith("SPARTICUS")}
+    def test_main_racer_only_asks_for_three(self):
         ssm = FakeSSM({"/k": "K", "/s": "S", "/w": "W"})
-        secrets_from_ssm(ssm, env)
+        secrets_from_ssm(ssm, self.ENV, entrants=[Entrant("NantBot", main=True)])
         self.assertEqual(ssm.calls[0][0], ["/k", "/s", "/w"])
 
     def test_weekly_handler_wiring(self):
         fake_boto3 = mock.Mock()
-        fake_boto3.client.return_value = FakeSSM({"/k": "K", "/s": "S", "/w": "W", "/sk": "SK", "/ss": "SS"})
+        fake_boto3.client.return_value = FakeSSM({"/k": "K", "/s": "S", "/w": "W", self.SK: "SK", self.SS: "SS"})
         with mock.patch.dict(os.environ, self.ENV), mock.patch.dict(sys.modules, {"boto3": fake_boto3}), \
                 mock.patch.object(app, "run_weekly", return_value={"status": "ok"}) as fake_run:
             self.assertEqual(app.weekly_handler(None, None), {"status": "ok"})
