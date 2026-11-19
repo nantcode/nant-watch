@@ -47,6 +47,7 @@ class FakeClient:
         self.fail_symbols = set(fail_symbols)
         self.request_count = 0
         self.bar_calls = []
+        self.bar_options = []
 
     def get_calendar(self, start, end):
         self.request_count += 1
@@ -56,9 +57,10 @@ class FakeClient:
         self.request_count += 1
         return self.assets
 
-    def get_bars(self, symbols, start, end=None):
+    def get_bars(self, symbols, start, end=None, **options):
         self.request_count += 1
         self.bar_calls.append((list(symbols), start))
+        self.bar_options.append(options)
         if self.fail_symbols & set(symbols):
             raise AlpacaError("HTTP 400: invalid symbol")
         return {s: self.bars[s] for s in symbols if s in self.bars}

@@ -1,10 +1,10 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from app import make_accounts, run_daily
-from formatting import SAFE_LIMIT
+from formatting import SAFE_LIMIT, Mover
 from race import account_series
-from sessions import build_session_post, clock_label, live_label, race_post, review_post
+from sessions import build_session_post, build_session_report, clock_label, live_label, race_post, review_post
 from test_race import history
 from test_scanner import CALENDAR, FakeClient, asset, bar
 
@@ -114,6 +114,71 @@ class TestReviews(unittest.TestCase):
     def test_unknown_mode(self):
         with self.assertRaises(ValueError):
             build_session_post("lunch", make_market(), {}, CALENDAR, RACE_ET)
+
+
+MOOD = "Market mood: 10 of 14 funds above their 200-day average (bullish)"
+
+
+def make_market_with_fund_history():
+    """make_market() plus 220 days of prices for the 14 funds, so the mood can be judged."""
+    from test_mood import fund_bars
+    from test_scanner import weekdays
+    market = make_market()
+    market.bars.update(fund_bars(days=weekdays(OCT8 - timedelta(days=330), OCT8)[-220:]))
+    return market
+
+
+class TestMarketMoodInThePost(unittest.TestCase):
+
+    def test_task_b_the_mood_goes_under_the_market_lines(self):
+        """TASK B: this passes once build_session_report adds the mood line."""
+        indexes = [Mover("SPY", 672.41, 0.84, 61_200_000), Mover("QQQ", 598.10, -0.37, 38_900_000)]
+        text = "\n".join(build_session_report("HEADER", indexes, [], [], "BOARD", "FOOTER", mood=MOOD))
+        self.assertIn("(-0.37%)\n" + MOOD + "\n", text)                # on its own line, right after QQQ
+        self.assertLess(text.index(MOOD), text.index("Top Gainers"))    # inside the Market section
+
+    def test_no_mood_leaves_the_post_exactly_as_it_was(self):
+        indexes = [Mover("SPY", 672.41, 0.84, 61_200_000)]
+        without = build_session_report("HEADER", indexes, [], [], "BOARD", "FOOTER")
+        empty = build_session_report("HEADER", indexes, [], [], "BOARD", "FOOTER", mood="")
+        self.assertEqual(without, empty)
+        self.assertNotIn("Market mood", "\n".join(without))
+        self.assertIn("**Market**\n🟢 **SPY** $672.41 (+0.84%)\n\n**🚀 Top Gainers**", "\n".join(without))
+
+    def test_the_open_review_shows_the_mood(self):
+        """Needs TASK A and TASK B: the whole path, from Alpaca's bars to the post."""
+        market = make_market_with_fund_history()
+        messages, summary = review_post("open", market, {"NantBot": market}, CALENDAR, OPEN_ET)
+        self.assertIn(MOOD, "\n".join(messages))
+        self.assertIn(MOOD, summary)
+        for message in messages:
+            self.assertLessEqual(len(message), SAFE_LIMIT)
+
+    def test_the_close_review_shows_the_mood_too(self):
+        market = make_market_with_fund_history()
+        messages, _ = review_post("close", market, {"NantBot": market}, CALENDAR, CLOSE_ET)
+        self.assertIn(MOOD, "\n".join(messages))
+
+    def test_race_posts_do_not_fetch_the_mood(self):
+        market = make_market_with_fund_history()
+        messages, _ = race_post(market, {"NantBot": market}, CALENDAR, RACE_ET)
+        self.assertNotIn("Market mood", "\n".join(messages))
+        self.assertEqual(market.bar_calls, [(["SPY"], OCT2)])
+
+    def test_a_mood_problem_never_stops_the_review(self):
+        market = make_market_with_fund_history()
+        market.fail_symbols = {"TLT"}                       # the mood request fails; the scan does not ask for TLT
+        messages, summary = review_post("open", market, {"NantBot": market}, CALENDAR, OPEN_ET)
+        text = "\n".join(messages)
+        self.assertIn("Market Open Review", text)
+        self.assertIn("Race Scoreboard", text)
+        self.assertNotIn("Market mood", text)
+        self.assertNotIn("Market mood", summary)
+
+    def test_without_fund_history_the_post_is_unchanged(self):
+        market = make_market()                               # SPY and QQQ only have 5 days here
+        messages, _ = review_post("open", market, {"NantBot": market}, CALENDAR, OPEN_ET)
+        self.assertNotIn("Market mood", "\n".join(messages))
 
 
 SECRETS = {"key_id": "NKEY", "secret_key": "NS", "webhook_url": "https://discord.example/hook",

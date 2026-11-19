@@ -18,6 +18,7 @@ from formatting import (
     section,
 )
 from market_math import daily_window, trading_days_from_calendar
+from mood import safe_mood_line
 from race import RACE_START, Racer, build_scoreboard
 from scanner import run_scan
 
@@ -46,10 +47,16 @@ def race_summary(racers: Sequence[Racer]) -> str:
 
 
 def build_session_report(header: str, indexes: Sequence[Mover], gainers: Sequence[Mover],
-                         losers: Sequence[Mover], scoreboard_text: str, footer: str) -> List[str]:
+                         losers: Sequence[Mover], scoreboard_text: str, footer: str,
+                         mood: str = "") -> List[str]:
+    """Put the pieces of a review post together.
+    mood: the "Market mood: ..." line, or "" when there is none to show."""
+    market = market_summary(indexes)
+    if mood: 
+        market = market + "\n" + mood
     sections = [
         header,
-        section("Market", market_summary(indexes)),
+        section("Market", market),
         section("🚀 Top Gainers", movers_table(gainers)),
         section("📉 Top Losers", movers_table(losers)),
         scoreboard_text,
@@ -98,9 +105,10 @@ def review_post(mode: str, client, accounts: Dict[str, object], trading_days: Se
             as_of = clock_label(now_et - DATA_DELAY)
             footer = (f"_Prices as of about {as_of} ET (free data runs 15 minutes behind). "
                       "Not financial advice._")
+    mood = safe_mood_line(client, window.end_day)
     messages = build_session_report(header, result.indexes, result.gainers, result.losers,
-                                    scoreboard_text, footer)
-    return messages, f"{result.summary()} | {race_summary(racers)}"
+                                    scoreboard_text, footer, mood=mood)
+    return messages, f"{result.summary()} | {race_summary(racers)}" + (f" | {mood}" if mood else "")
 
 
 def build_session_post(mode: str, client, accounts: Dict[str, object], trading_days: Sequence[date],
