@@ -29,14 +29,8 @@ def count_uptrends(closes_by_symbol: Dict[str, Sequence[float]], days: int = TRE
         if len(closes) < days:
             continue                                  # not enough history: skip this fund
         average = sum(closes[-days:]) / days          # the average of its last `days` closes
-        # ---- YOUR TWO LINES GO HERE ---------------------------------------------------------
-        # If this fund's latest close is above `average`, add 1 to `count`.
-        #   * closes[-1] is the latest close.
-        #   * "add 1 to count" is written:  count += 1
         if closes[-1] > average:
             count += 1
-
-        #   * the two lines sit inside this loop, so they start under the "a" of "average".
     return count
 
 
